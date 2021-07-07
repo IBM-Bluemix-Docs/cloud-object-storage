@@ -2,7 +2,7 @@
 
 copyright:
   years: 2017, 2019
-lastupdated: "2019-11-11"
+lastupdated: "2021-1-30"
 
 keywords: authorization, aws, hmac, signature, presign
 
@@ -747,4 +747,147 @@ var request = https.get(requestUrl, function (response) {
 });
 
 request.end();
+```
+## Create a presigned URL - PHP
+{: #presign-url-get-put-php}
+
+```php
+<?php
+
+class Signature
+{
+    private $accessKey;
+    private $secretKey;
+    private $region;
+    private $endpoint;
+    private $host;
+    public $httpMethod;
+    public $bucket;
+    public $objectKey;
+    public $expiration;
+
+    public function __construct()
+    {
+        $this->accessKey = "{COS_HMAC_ACCESS_KEY_ID}";
+        $this->secretKey = "{COS_HMAC_SECRET_ACCESS_KEY}";
+
+        $this->httpMethod = "GET"; //change the method to PUT for upload URL
+        $this->host = "{endpoint}";
+        $this->region = "";
+        $this->endpoint = 'https://' . $this->host;
+        $this->bucket = "example-bucket";
+        $this->objectKey = "example-object";
+        $this->expiration = 86400; //time in seconds
+    }
+
+    // hashing and signing methods
+    public function hash($key, $msg)
+    {
+        return hash_hmac('sha256', utf8_encode($msg), $key, true);
+    }
+
+    public function hashWithoutUTFEncoding($key, $msg)
+    {
+        return hash_hmac('sha256', $msg, $key, true);
+    }
+
+    public function hmacHex($key, $msg)
+    {
+        return hash_hmac('sha256', $msg, $key, false);
+    }
+
+    public function hashHex($msg)
+    {
+        return hash('sha256', $msg, false);
+    }
+
+    // region is a wildcard value that takes the place of the AWS region value
+    // as COS doesn't use the same conventions for regions, this parameter can accept any string
+    public function createSignatureKey($key, $datestamp, $region, $service)
+    {
+        $keyDate = $this->hash(('AWS4' . $key), $datestamp);
+        $keyString = $this->hashWithoutUTFEncoding($keyDate, $region);
+        $keyService = $this->hashWithoutUTFEncoding($keyString, $service);
+        $keySigning = $this->hashWithoutUTFEncoding($keyService, 'aws4_request');
+        return $keySigning;
+    }
+
+    public function createHexSignatureKey($key, $datestamp, $region, $service)
+    {
+        $keyDate = $this->hashHex(('AWS4' . $key), $datestamp);
+        $keyString = $this->hashHex($keyDate, $region);
+        $keyService = $this->hashHex($keyString, $service);
+        $keySigning = $this->hashHex($keyService, 'aws4_request');
+        return $keySigning;
+    }
+
+    public function encodeURIComponent($str)
+    {
+        $revert = array('%21' => '!', '%2A' => '*', '%27' => "'", '%28' => '(', '%29' => ')');
+        return strtr(rawurlencode($str), $revert);
+    }
+
+
+    public function getSignature()
+    {
+        // assemble the standardized request
+        $dt = new DateTime();
+        $dt->setTimeZone(new DateTimeZone('UTC'));
+        $timestamp = $dt->format('Ymd') . "T" . $dt->format('hms') . 'Z';
+
+        $datestamp = $dt->format('Ymd');
+
+        $standardizedQuerystring = 'X-Amz-Algorithm=AWS4-HMAC-SHA256' .
+            '&X-Amz-Credential=' . $this->encodeURIComponent($this->accessKey . '/' . $datestamp . '/' . $this->region . '/s3/aws4_request') .
+            '&X-Amz-Date=' . $timestamp .
+            '&X-Amz-Expires=' . strval($this->expiration) .
+            '&X-Amz-SignedHeaders=host';
+        $standardizedResource = '/' . $this->bucket . '/' . $this->objectKey;
+
+        $payloadHash = 'UNSIGNED-PAYLOAD';
+        $standardizedHeaders = 'host:' . $this->host;
+        $signedHeaders = 'host';
+
+
+        $standardizedRequest = $this->httpMethod . "\n" .
+            $standardizedResource . "\n" .
+            $standardizedQuerystring . "\n" .
+            $standardizedHeaders . "\n" .
+            "\n" .
+            $signedHeaders . "\n" .
+            $payloadHash;
+
+        // assemble string-to-sign
+        $hashingAlgorithm = 'AWS4-HMAC-SHA256';
+        $credentialScope = $datestamp . '/' . $this->region . '/' . 's3' . '/' . 'aws4_request';
+        $sts = $hashingAlgorithm . "\n" .
+            $timestamp . "\n" .
+            $credentialScope . "\n" .
+            $this->hashHex($standardizedRequest);
+
+        // generate the signature
+        $signatureKey = $this->createSignatureKey($this->secretKey, $datestamp, $this->region, 's3');
+
+        $signature = $this->hmacHex($signatureKey, $sts);
+
+        // create and send the request
+        // the 'requests' package autmatically adds the required 'host' header
+        $requestUrl = $this->endpoint . '/' .
+            $this->bucket . '/' .
+            $this->objectKey . '?' .
+            $standardizedQuerystring .
+            '&X-Amz-Signature=' .
+            $signature;
+
+        error_log(" REQUEST URL  = " . $requestUrl . "\n\n");
+        return $requestUrl;
+    }
+}
+
+
+$obj = new Signature();
+$obj->getSignature();
+
+
+
 ```
