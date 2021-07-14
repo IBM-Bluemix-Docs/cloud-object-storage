@@ -50,7 +50,7 @@ Looking for instructions for how to use {{site.data.keyword.cos_full}} in an {{s
 On OSX, use [Homebrew](https://brew.sh/):
 
 ```sh
-brew cask install osxfuse
+brew install --cask osxfuse
 brew install s3fs
 ```
 {:codeblock}
